@@ -1,63 +1,63 @@
-console.log("Service Worker Loaded");
+console.log("BACKGROUND SCRIPT STARTED (V1.1)");
 
 chrome.runtime.onInstalled.addListener(() => {
   console.log("Extension Installed/Updated");
-  chrome.contextMenus.create({
-    id: "block-domain",
-    title: "Block Domain (Pi-hole)",
-    contexts: ["image", "frame", "link", "page"]
-  }, () => {
-    if (chrome.runtime.lastError) {
-      console.error("Context menu creation error:", chrome.runtime.lastError.message);
-    } else {
-      console.log("Context menu created successfully");
-    }
+  chrome.contextMenus.removeAll(() => {
+    chrome.contextMenus.create({
+      id: "block-domain",
+      title: "Block Domain (Pi-hole)",
+      contexts: ["image", "frame", "link", "page"]
+    }, () => {
+        console.log("Context menu 'block-domain' created.");
+    });
   });
 });
 
 chrome.contextMenus.onClicked.addListener((info, tab) => {
-  console.log("Context menu clicked:", info);
+  console.log("Context menu clicked! Info:", info);
 
-  if (info.menuItemId === "block-domain") {
-    let targetUrl = info.srcUrl || info.frameUrl || info.linkUrl || info.pageUrl;
-    console.log("Target URL identified:", targetUrl);
+  // Fallback for notification if logic fails
+  try {
+      if (info.menuItemId === "block-domain") {
+        let targetUrl = info.srcUrl || info.frameUrl || info.linkUrl || info.pageUrl;
+        console.log("Processing URL:", targetUrl);
 
-    if (!targetUrl) {
-      console.error("No target URL found");
-      notifyUser("Error", "Could not determine URL to block.");
-      return;
-    }
+        if (!targetUrl) {
+          notifyUser("Error", "No URL found.");
+          return;
+        }
 
-    try {
-      const url = new URL(targetUrl);
-      const domain = url.hostname;
-      console.log("Parsed Domain:", domain);
-      triggerGitHubAction(domain);
-    } catch (e) {
-      console.error("URL parsing error:", e);
-      notifyUser("Error", "Invalid URL: " + targetUrl);
-    }
+        try {
+          const url = new URL(targetUrl);
+          const domain = url.hostname;
+          notifyUser("Processing", `Domain: ${domain}`); // Immediate feedback
+          triggerGitHubAction(domain);
+        } catch (e) {
+          console.error("URL Error:", e);
+          notifyUser("Error", "Invalid URL format.");
+        }
+      }
+  } catch(err) {
+      console.error("Top level error in click handler:", err);
   }
 });
 
 async function triggerGitHubAction(domain) {
-  console.log("Triggering GitHub Action for:", domain);
   try {
     const data = await chrome.storage.sync.get(["githubUser", "githubRepo", "githubPat"]);
-    console.log("Storage data retrieved:", { user: data.githubUser, repo: data.githubRepo, pat: data.githubPat ? "***" : "missing" });
-
     const { githubUser, githubRepo, githubPat } = data;
 
     if (!githubUser || !githubRepo || !githubPat) {
-      console.error("Missing credentials");
-      notifyUser("Configuration Error", "Please set GitHub credentials in extension options.");
+      notifyUser("Setup Required", "Please check Extension Options.");
       chrome.runtime.openOptionsPage();
       return;
     }
 
     const apiUrl = `https://api.github.com/repos/${githubUser}/${githubRepo}/dispatches`;
-    console.log("Sending request to:", apiUrl);
     
+    // Explicitly log the fetch attempt
+    console.log(`Fetching: ${apiUrl}`);
+
     const response = await fetch(apiUrl, {
       method: "POST",
       headers: {
@@ -73,36 +73,34 @@ async function triggerGitHubAction(domain) {
       })
     });
 
-    console.log("Response status:", response.status);
-    
     if (response.ok) {
-      console.log("Request successful");
-      notifyUser("Success", `Sent request to block: ${domain}`);
+        console.log("GitHub Request Success");
+        notifyUser("Blocked!", `${domain} sent to GitHub.`);
     } else {
-      const errorText = await response.text();
-      console.error("GitHub API Error:", response.status, errorText);
-      notifyUser("API Error", `Failed: ${response.status}. See Console.`);
+        const txt = await response.text();
+        console.error("GitHub Request Failed:", txt);
+        notifyUser("Failed", `GitHub API: ${response.status}`);
     }
   } catch (error) {
-    console.error("Network/Script Error:", error);
-    notifyUser("Network Error", `Failed: ${error.message}`);
+    console.error("Fetch/Network Error:", error);
+    notifyUser("Network Error", error.message);
   }
 }
 
 function notifyUser(title, message) {
-  console.log("Attempting notification:", title, message);
-  const options = {
+  console.log(`[Notification] ${title}: ${message}`);
+  // Minimal notification options to avoid errors with missing icons or unsupported types
+  chrome.notifications.create({
     type: "basic",
     title: title,
     message: message,
-    iconUrl: "icon48.png"
-  };
-  
-  chrome.notifications.create(options, (notificationId) => {
-    if (chrome.runtime.lastError) {
-      console.error("Notification Error:", chrome.runtime.lastError.message);
-    } else {
-      console.log("Notification created ID:", notificationId);
-    }
+    iconUrl: "icon48.png", // Ensure this file exists, otherwise notifications fail
+    priority: 2
+  }, (id) => {
+      if (chrome.runtime.lastError) {
+          console.error("Notification failed:", chrome.runtime.lastError);
+      } else {
+          console.log("Notification sent, ID:", id);
+      }
   });
 }
